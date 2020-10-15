@@ -1,0 +1,14 @@
+[package]
+name = "luna"
+version = "0.1.0"
+authors = ["Tskken <35545683+Tskken@users.noreply.github.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+log = "*"
+env_logger = "*"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+winapi= { version = "0.3", features = ["shellapi", "libloaderapi", "impl-default", "errhandlingapi", "winbase"] }
