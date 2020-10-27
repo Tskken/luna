@@ -13,7 +13,9 @@ use winapi::{
         libloaderapi,
         winuser::{
             self, CW_USEDEFAULT, WM_DESTROY, WNDCLASSW, MSG, WM_CLOSE, SW_SHOW,
-            WS_OVERLAPPEDWINDOW, WS_EX_TOOLWINDOW, PAINTSTRUCT, COLOR_WINDOW, COLOR_GRAYTEXT, WM_PAINT, VK_ESCAPE, WM_CHAR, WM_LBUTTONUP, WM_RBUTTONUP
+            WS_OVERLAPPEDWINDOW, WS_EX_TOOLWINDOW, PAINTSTRUCT, COLOR_WINDOW, COLOR_GRAYTEXT, WM_PAINT, VK_ESCAPE, WM_CHAR, WM_LBUTTONUP, WM_RBUTTONUP,
+            WS_OVERLAPPED, WS_CHILDWINDOW, WS_POPUP, WS_SYSMENU, WS_CAPTION, WS_BORDER, WS_HSCROLL, WS_DISABLED,
+            WS_EX_TRANSPARENT, WS_EX_LAYERED, WS_EX_WINDOWEDGE, LWA_ALPHA,
         },
         errhandlingapi,
     },
@@ -22,7 +24,7 @@ use winapi::{
 use log::{info, debug};
 
 use crate::geometry::Rectangle;
-use crate::tray::Application;
+use crate::tray_old::Application;
 use crate::util::to_os_string;
 use crate::event::{EVENT_HANDLER, Handler};
 use crate::window::Window;
@@ -127,15 +129,15 @@ impl App {
             
             let mut windows = HashMap::new();
             {
-                let window = Window::new(wnd, "test window", Rectangle::new(50, 50, 500, 500), None)?;
-
-                debug!("window 1: {:?}", window);
+                let window = Window::new(wnd, "test window", Rectangle::new(50, 50, 500, 500), WS_EX_TOOLWINDOW | WS_EX_LAYERED, WS_POPUP, None, None)?;
+                winuser::SetLayeredWindowAttributes(window.hwnd, 0, 100, LWA_ALPHA);
+                debug!("window 1: {:?}", window.hwnd);
     
                 windows.insert(window.hwnd, window);
     
-                let window2 = Window::new(wnd, "test window 2", Rectangle::new(600, 50, 500, 500), None)?;
-    
-                debug!("window 2: {:?}", window2);
+                let window2 = Window::new(wnd, "test window 2", Rectangle::new(600, 50, 500, 500), WS_EX_TOOLWINDOW | WS_EX_LAYERED, WS_POPUP, None, None)?;
+                winuser::SetLayeredWindowAttributes(window2.hwnd, 0, 100, LWA_ALPHA);
+                debug!("window 2: {:?}", window2.hwnd);
     
                 windows.insert(window2.hwnd, window2);
     
@@ -215,7 +217,7 @@ impl App {
                 match self.receiver.try_recv() {
                     Ok(hwnd) => {
                         match self.windows.remove(&hwnd) {
-                            Some(w) => debug!("{:?} removed", w),
+                            Some(w) => debug!("{:?} removed", w.hwnd),
                             None => panic!("remove of same window twice"),
                         }
                     },

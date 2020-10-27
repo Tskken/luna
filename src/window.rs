@@ -22,24 +22,25 @@ use winapi::{
 };
 
 use crate::geometry::Rectangle;
+use crate::event::Callback;
 use crate::util::to_os_string;
 use crate::error::{Error, Result};
 
-#[derive(Debug)]
 pub struct Window {
     pub hwnd: HWND,
     pub hmenu: Option<HMENU>,
+    pub callback: Option<Callback>,
 }
 
 impl Window {
-    pub fn new(class: WNDCLASSW, name: &str, bounds: Rectangle<c_int>, _parent: Option<HWND>) -> Result<Window> {
+    pub fn new(class: WNDCLASSW, name: &str, bounds: Rectangle<c_int>, flags: DWORD, style: DWORD, hmenu: Option<HMENU>, callback: Option<Callback>) -> Result<Window> {
         let hwnd;
         unsafe {
             hwnd = winuser::CreateWindowExW(
-                WS_EX_TOOLWINDOW | WS_EX_LAYERED,
+                flags,
                 class.lpszClassName,
                 to_os_string(name).as_ptr(),
-                WS_POPUP,
+                style,
                 bounds.x(),
                 bounds.y(),
                 bounds.w(),
@@ -54,14 +55,13 @@ impl Window {
                 return Err(Error::from("Error creating window".to_string()));
             }
 
-            winuser::SetLayeredWindowAttributes(hwnd, 0, 100, LWA_ALPHA);
-
-            //winuser::ShowWindow(hwnd, SW_SHOW);
+            //winuser::SetLayeredWindowAttributes(hwnd, 0, 100, LWA_ALPHA);
         }
 
         Ok(Window {
             hwnd,
-            hmenu: None,
+            hmenu,
+            callback,
         })
     }
 }
