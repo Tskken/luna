@@ -4,6 +4,7 @@ pub mod app;
 pub mod window;
 pub mod tray;
 pub mod event;
+pub mod geometry;
 pub mod util;
 pub mod error;
 

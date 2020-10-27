@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::sync::mpsc::{Sender, Receiver, channel, TryRecvError };
+use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
 
 use winapi::{
     ctypes::c_int,
@@ -11,8 +12,8 @@ use winapi::{
     um::{
         libloaderapi,
         winuser::{
-            self, CW_USEDEFAULT, WM_DESTROY, WNDCLASSW, MSG, WM_CLOSE,
-            WS_OVERLAPPEDWINDOW, PAINTSTRUCT, COLOR_WINDOW, WM_PAINT, VK_ESCAPE, WM_CHAR, WM_LBUTTONUP
+            self, CW_USEDEFAULT, WM_DESTROY, WNDCLASSW, MSG, WM_CLOSE, SW_SHOW,
+            WS_OVERLAPPEDWINDOW, WS_EX_TOOLWINDOW, PAINTSTRUCT, COLOR_WINDOW, COLOR_GRAYTEXT, WM_PAINT, VK_ESCAPE, WM_CHAR, WM_LBUTTONUP, WM_RBUTTONUP
         },
         errhandlingapi,
     },
@@ -20,6 +21,8 @@ use winapi::{
 
 use log::{info, debug};
 
+use crate::geometry::Rectangle;
+use crate::tray::Application;
 use crate::util::to_os_string;
 use crate::event::{EVENT_HANDLER, Handler};
 use crate::window::Window;
@@ -28,7 +31,11 @@ use crate::error::{Error, Result};
 pub struct App {
     windows: HashMap<HWND, Window>,
 
+    tray: Application,
+
     receiver: Receiver<HWND>,
+
+    running: Arc<AtomicBool>,
 
     #[allow(dead_code)]
     window_count: u32,
@@ -42,18 +49,14 @@ pub struct App {
 
 impl App {
     pub fn new() -> Result<App> {
-        //let (sender, receiver) = channel::<HWND>();
         unsafe extern "system" fn window_proc(hwnd: HWND, msg: UINT, w_param: WPARAM, l_param: LPARAM) -> LRESULT {
             match msg {
                 WM_DESTROY => {
-                    //winuser::SendMessageW(hwnd, WM_CLOSE, 0, 0 as LPARAM);
-                    //winuser::DestroyWindow(hwnd);
                     EVENT_HANDLER.with(|handler| {
                         if let Some(h) = handler.borrow().as_ref() {
                             h.sender.send(hwnd).ok();
                         }
                     });
-                    //winuser::PostQuitMessage(0);
                     return 0;
                 },
                 WM_PAINT => {
@@ -72,16 +75,14 @@ impl App {
                     };
                     let hdc = winuser::BeginPaint(hwnd, &mut ps);
         
-                    winuser::FillRect(hdc, &ps.rcPaint, (COLOR_WINDOW + 1) as HBRUSH);
+                    winuser::FillRect(hdc, &ps.rcPaint, COLOR_GRAYTEXT as HBRUSH);
         
                     winuser::EndPaint(hwnd, &ps);
                     return 0;
                 },
                 WM_CHAR => {
                     if w_param as c_int == VK_ESCAPE {
-                        //winuser::SendMessageW(hwnd, WM_CLOSE, 0, 0 as LPARAM);
                         winuser::DestroyWindow(hwnd);
-                        //winuser::PostQuitMessage(0);
                         return 0;
                     }
         
@@ -90,7 +91,11 @@ impl App {
                 WM_LBUTTONUP => {
                     info!("window clicked: {:?}", hwnd);
                     return 0;
-                }
+                },
+                WM_RBUTTONUP => {
+                    winuser::DestroyWindow(hwnd);
+                    return 0;
+                },
                 _ => return winuser::DefWindowProcW(hwnd, msg, w_param, l_param),
             };
         }
@@ -121,24 +126,49 @@ impl App {
             });
             
             let mut windows = HashMap::new();
+            {
+                let window = Window::new(wnd, "test window", Rectangle::new(50, 50, 500, 500), None)?;
 
-            let window = Window::new(wnd, "test window", None)?;
+                debug!("window 1: {:?}", window);
+    
+                windows.insert(window.hwnd, window);
+    
+                let window2 = Window::new(wnd, "test window 2", Rectangle::new(600, 50, 500, 500), None)?;
+    
+                debug!("window 2: {:?}", window2);
+    
+                windows.insert(window2.hwnd, window2);
+    
+                debug!("{}", windows.len());
+            }
+            let mut tray = Application::new().unwrap();
 
-            debug!("window 1: {:?}", window);
-
-            windows.insert(window.hwnd, window);
-
-            let window2 = Window::new(wnd, "test window 2", None)?;
-
-            debug!("window 2: {:?}", window2);
-
-            windows.insert(window2.hwnd, window2);
-
-            debug!("{}", windows.len());
+            tray.set_icon("./src/rust.ico").unwrap();
+        
+            let running = Arc::new(AtomicBool::new(false));
+        
+            tray.add_menu_item("filler", |_| {
+                println!("filler button");
+                Ok::<_, Error>(())
+            }).unwrap();
+        
+            tray.add_menu_separator().unwrap();
+        
+            let running_clone = running.clone();
+            tray.add_menu_item("Quit", move |window| {
+                println!("Quitting app");
+                window.quit();
+                running_clone.store(true, Ordering::SeqCst);
+                Ok::<_, Error>(())
+            }).unwrap();
+        
+            tray.set_tooltip("luna").unwrap();
 
             Ok(App {
                 windows,
+                tray,
                 receiver,
+                running,
                 window_count: 0,
                 instance: hinstance,
                 class: wnd,
@@ -149,7 +179,7 @@ impl App {
     pub fn run(&mut self) -> Result<()> {
         unsafe {
             for (_, window) in self.windows.iter() {
-                winuser::ShowWindow(window.hwnd, 1);
+                winuser::ShowWindow(window.hwnd, SW_SHOW);
             }
 
             let mut msg = MSG {
@@ -162,6 +192,15 @@ impl App {
             };
 
             loop {
+                self.tray.update().unwrap();
+                match self.running.load(Ordering::SeqCst) {
+                    true => {
+                        debug!("closing luna from tray");
+                        winuser::PostQuitMessage(0);
+                    },
+                    false => (),
+                }
+
                 match winuser::GetMessageW(&mut msg, 0 as HWND, 0, 0) {
                     0 => {
                         debug!("closing window");
@@ -175,12 +214,10 @@ impl App {
 
                 match self.receiver.try_recv() {
                     Ok(hwnd) => {
-                        self.windows.remove(&hwnd);
-                        debug!("{}", self.windows.len());
-                        // match self.windows.remove(&hwnd) {
-                        //     Some(w) => debug!("{:?}", w),
-                        //     None => panic!("remove of same window twice"),
-                        // }
+                        match self.windows.remove(&hwnd) {
+                            Some(w) => debug!("{:?} removed", w),
+                            None => panic!("remove of same window twice"),
+                        }
                     },
                     Err(TryRecvError::Empty) => (),
                     Err(e) => panic!(e),
@@ -188,6 +225,7 @@ impl App {
 
                 if self.windows.len() == 0 {
                     debug!("no windows, closing program");
+                    self.tray.quit();
                     winuser::PostQuitMessage(0);
                     break;
                 }
